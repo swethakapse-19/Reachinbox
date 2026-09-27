@@ -25,11 +25,11 @@ const GOOGLE_CLIENT_SECRET =
 
 const GOOGLE_REDIRECT_URI =
   process.env.GOOGLE_REDIRECT_URI ||
-  "http://localhost:5000/api/auth/google/callback";
+  "https://reachinbox-backend-tmec.onrender.com/api/auth/google/callback";
 
 const FRONTEND_URL =
   process.env.FRONTEND_URL ||
-  "http://localhost:5173";
+  "https://reachinbox-jade.vercel.app";
 
 const JWT_SECRET =
   process.env.AUTH_JWT_SECRET ||
