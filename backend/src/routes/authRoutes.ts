@@ -216,12 +216,16 @@ router.get(
 
       /*
        * Store JWT in HTTP-only cookie
+       *
+       * SameSite=None + Secure is required
+       * because frontend and backend are hosted
+       * on different domains.
        */
       res.setHeader(
         "Set-Cookie",
         `reachinbox_token=${encodeURIComponent(
           token
-        )}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`
+        )}; HttpOnly; Path=/; SameSite=None; Secure; Max-Age=604800`
       );
 
       /*
@@ -316,7 +320,7 @@ router.get("/me", async (req, res) => {
 router.post("/logout", (_req, res) => {
   res.setHeader(
     "Set-Cookie",
-    "reachinbox_token=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0"
+    "reachinbox_token=; HttpOnly; Path=/; SameSite=None; Secure; Max-Age=0"
   );
 
   return res.json({
@@ -330,4 +334,3 @@ router.post("/logout", (_req, res) => {
  * Export router
  */
 export default router;
-

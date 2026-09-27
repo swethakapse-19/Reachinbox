@@ -26,25 +26,28 @@ import {
 
 type Tab = "scheduled" | "sent";
 
-const API_BASE = "/api";
+/*
+ * Production:
+ * VITE_API_URL=https://YOUR-RENDER-BACKEND.onrender.com/api
+ *
+ * Local development:
+ * falls back to http://localhost:5000/api
+ */
+const API_BASE =
+  import.meta.env.VITE_API_URL ||
+  "http://localhost:5000/api";
+
+const BACKEND_BASE = API_BASE.replace(/\/api\/?$/, "");
 
 function getMinimumDateTime() {
   const date = new Date();
   date.setMinutes(date.getMinutes() + 1);
 
   const year = date.getFullYear();
-  const month = String(
-    date.getMonth() + 1
-  ).padStart(2, "0");
-  const day = String(
-    date.getDate()
-  ).padStart(2, "0");
-  const hours = String(
-    date.getHours()
-  ).padStart(2, "0");
-  const minutes = String(
-    date.getMinutes()
-  ).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
 
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
@@ -69,46 +72,36 @@ function parseRecipients(value: string) {
 }
 
 function isValidEmail(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-    value
-  );
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
 function App() {
-  const [user, setUser] =
-    useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(null);
 
-  const [emails, setEmails] =
-    useState<Email[]>([]);
+  const [emails, setEmails] = useState<Email[]>([]);
 
-  const [senders, setSenders] =
-    useState<Sender[]>([]);
+  const [senders, setSenders] = useState<Sender[]>([]);
 
-  const [slack, setSlack] =
-    useState<SlackStatus>({
-      connected: false,
-      team: null,
-      channelId: null,
-      connectedAt: null,
-    });
+  const [slack, setSlack] = useState<SlackStatus>({
+    connected: false,
+    team: null,
+    channelId: null,
+    connectedAt: null,
+  });
 
-  const [loading, setLoading] =
-    useState(true);
+  const [loading, setLoading] = useState(true);
 
   const [dashboardLoading, setDashboardLoading] =
     useState(false);
 
-  const [error, setError] =
-    useState("");
+  const [error, setError] = useState("");
 
   const [activeTab, setActiveTab] =
     useState<Tab>("scheduled");
 
-  const [searchQuery, setSearchQuery] =
-    useState("");
+  const [searchQuery, setSearchQuery] = useState("");
 
-  const [showCompose, setShowCompose] =
-    useState(false);
+  const [showCompose, setShowCompose] = useState(false);
 
   const [showSenderModal, setShowSenderModal] =
     useState(false);
@@ -131,10 +124,8 @@ function App() {
   const [searchLoading, setSearchLoading] =
     useState(false);
 
-  const [
-    slackLoading,
-    setSlackLoading,
-  ] = useState(false);
+  const [slackLoading, setSlackLoading] =
+    useState(false);
 
   const [composeError, setComposeError] =
     useState("");
@@ -142,14 +133,11 @@ function App() {
   const [senderError, setSenderError] =
     useState("");
 
-  const [recipients, setRecipients] =
-    useState("");
+  const [recipients, setRecipients] = useState("");
 
-  const [subject, setSubject] =
-    useState("");
+  const [subject, setSubject] = useState("");
 
-  const [body, setBody] =
-    useState("");
+  const [body, setBody] = useState("");
 
   const [scheduledAt, setScheduledAt] =
     useState(getMinimumDateTime());
@@ -164,11 +152,9 @@ function App() {
     setSelectedSenderId,
   ] = useState("");
 
-  const [senderName, setSenderName] =
-    useState("");
+  const [senderName, setSenderName] = useState("");
 
-  const [senderEmail, setSenderEmail] =
-    useState("");
+  const [senderEmail, setSenderEmail] = useState("");
 
   const [senderHost, setSenderHost] =
     useState("smtp.ethereal.email");
@@ -179,11 +165,15 @@ function App() {
   const [senderSecure, setSenderSecure] =
     useState(false);
 
-  const [senderUsername, setSenderUsername] =
-    useState("");
+  const [
+    senderUsername,
+    setSenderUsername,
+  ] = useState("");
 
-  const [senderPassword, setSenderPassword] =
-    useState("");
+  const [
+    senderPassword,
+    setSenderPassword,
+  ] = useState("");
 
   const [uploadCount, setUploadCount] =
     useState(0);
@@ -224,17 +214,21 @@ function App() {
   const stats = useMemo(() => {
     return {
       total: emails.length,
+
       scheduled: emails.filter(
         (email) =>
           email.status === "SCHEDULED"
       ).length,
+
       processing: emails.filter(
         (email) =>
           email.status === "PROCESSING"
       ).length,
+
       sent: emails.filter(
         (email) => email.status === "SENT"
       ).length,
+
       failed: emails.filter(
         (email) => email.status === "FAILED"
       ).length,
@@ -364,8 +358,7 @@ function App() {
   async function handleSearch() {
     if (!user) return;
 
-    const query =
-      searchQuery.trim();
+    const query = searchQuery.trim();
 
     if (!query) {
       await loadDashboard(user);
@@ -405,14 +398,12 @@ function App() {
 
     if (!file) return;
 
-    const reader =
-      new FileReader();
+    const reader = new FileReader();
 
     reader.onload = () => {
-      const content =
-        String(
-          reader.result || ""
-        );
+      const content = String(
+        reader.result || ""
+      );
 
       const parsed =
         parseRecipients(content);
@@ -454,6 +445,7 @@ function App() {
       setComposeError(
         "Add at least one recipient."
       );
+
       return;
     }
 
@@ -467,6 +459,7 @@ function App() {
       setComposeError(
         "Please check the recipient email addresses."
       );
+
       return;
     }
 
@@ -474,6 +467,7 @@ function App() {
       setComposeError(
         "Subject is required."
       );
+
       return;
     }
 
@@ -481,6 +475,7 @@ function App() {
       setComposeError(
         "Email body is required."
       );
+
       return;
     }
 
@@ -491,6 +486,7 @@ function App() {
       setComposeError(
         "Please select a sender."
       );
+
       return;
     }
 
@@ -503,6 +499,7 @@ function App() {
       setComposeError(
         "Please select a valid start time."
       );
+
       return;
     }
 
@@ -511,18 +508,24 @@ function App() {
     try {
       await scheduleBulkEmails({
         userId: user.id,
+
         recipients:
           recipientList,
+
         subject:
           subject.trim(),
+
         body:
           body.trim(),
+
         scheduledAt:
           date.toISOString(),
+
         delayBetweenEmailsMs:
           Number(
             delayBetweenEmailsMs
           ) || 0,
+
         senderId:
           selectedSenderId ||
           undefined,
@@ -531,9 +534,13 @@ function App() {
       setShowCompose(false);
 
       setRecipients("");
+
       setSubject("");
+
       setBody("");
+
       setUploadCount(0);
+
       setScheduledAt(
         getMinimumDateTime()
       );
@@ -576,6 +583,7 @@ function App() {
       setSenderError(
         "Please fill in all sender fields."
       );
+
       return;
     }
 
@@ -587,6 +595,7 @@ function App() {
       setSenderError(
         "Enter a valid sender email."
       );
+
       return;
     }
 
@@ -596,18 +605,25 @@ function App() {
       const sender =
         await createSender({
           userId: user.id,
+
           name:
             senderName.trim(),
+
           email:
             senderEmail.trim(),
+
           host:
             senderHost.trim(),
+
           port:
             Number(senderPort) || 587,
+
           secure:
             senderSecure,
+
           username:
             senderUsername.trim(),
+
           password:
             senderPassword,
         });
@@ -624,13 +640,19 @@ function App() {
       );
 
       setSenderName("");
+
       setSenderEmail("");
+
       setSenderHost(
         "smtp.ethereal.email"
       );
+
       setSenderPort("587");
+
       setSenderSecure(false);
+
       setSenderUsername("");
+
       setSenderPassword("");
 
       setShowSenderModal(false);
@@ -698,6 +720,9 @@ function App() {
     }
   }
 
+  /*
+   * Hosted Slack OAuth
+   */
   function handleConnectSlack() {
     if (!user) return;
 
@@ -751,6 +776,7 @@ function App() {
       <div className="min-h-screen bg-[#080b12] flex items-center justify-center">
         <div className="text-center">
           <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-700 border-t-blue-500" />
+
           <p className="text-sm text-slate-400">
             Loading ReachInbox...
           </p>
@@ -760,9 +786,7 @@ function App() {
   }
 
   if (!user) {
-    return (
-      <LoginScreen />
-    );
+    return <LoginScreen />;
   }
 
   return (
@@ -778,6 +802,7 @@ function App() {
               <h1 className="text-lg font-semibold tracking-tight">
                 ReachInbox
               </h1>
+
               <p className="text-xs text-slate-500">
                 Email Scheduler
               </p>
@@ -789,6 +814,7 @@ function App() {
               <p className="text-sm font-medium text-slate-200">
                 {user.name}
               </p>
+
               <p className="text-xs text-slate-500">
                 {user.email}
               </p>
@@ -822,6 +848,7 @@ function App() {
         {error && (
           <div className="mb-5 flex items-center justify-between rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
             <span>{error}</span>
+
             <button
               onClick={() =>
                 setError("")
@@ -838,6 +865,7 @@ function App() {
             <h2 className="text-2xl font-semibold tracking-tight">
               Dashboard
             </h2>
+
             <p className="mt-1 text-sm text-slate-500">
               Manage scheduled email campaigns,
               senders and Slack notifications.
@@ -848,7 +876,7 @@ function App() {
             <button
               onClick={() =>
                 window.open(
-                  "http://localhost:5000/admin/queues",
+                  `${BACKEND_BASE}/admin/queues`,
                   "_blank"
                 )
               }
@@ -884,18 +912,22 @@ function App() {
             label="Total"
             value={stats.total}
           />
+
           <StatCard
             label="Scheduled"
             value={stats.scheduled}
           />
+
           <StatCard
             label="Processing"
             value={stats.processing}
           />
+
           <StatCard
             label="Sent"
             value={stats.sent}
           />
+
           <StatCard
             label="Failed"
             value={stats.failed}
@@ -910,6 +942,7 @@ function App() {
                   <h3 className="font-semibold">
                     Email Activity
                   </h3>
+
                   <p className="mt-1 text-xs text-slate-500">
                     Monitor scheduled and sent emails.
                   </p>
@@ -979,8 +1012,7 @@ function App() {
               </div>
             </div>
 
-            {visibleEmails.length ===
-            0 ? (
+            {visibleEmails.length === 0 ? (
               <EmptyState
                 title={
                   activeTab ===
@@ -999,9 +1031,7 @@ function App() {
                   "scheduled" ? (
                     <button
                       onClick={() => {
-                        setComposeError(
-                          ""
-                        );
+                        setComposeError("");
                         setShowCompose(
                           true
                         );
@@ -1021,15 +1051,19 @@ function App() {
                       <th className="px-5 py-3">
                         Recipient
                       </th>
+
                       <th className="px-5 py-3">
                         Subject
                       </th>
+
                       <th className="px-5 py-3">
                         Status
                       </th>
+
                       <th className="px-5 py-3">
                         Scheduled
                       </th>
+
                       <th className="px-5 py-3">
                         Sent
                       </th>
@@ -1148,16 +1182,13 @@ function App() {
                 Sender
               </label>
 
-              {activeSenders.length >
-              0 ? (
+              {activeSenders.length > 0 ? (
                 <div className="flex gap-2">
                   <select
                     value={
                       selectedSenderId
                     }
-                    onChange={(
-                      event
-                    ) =>
+                    onChange={(event) =>
                       setSelectedSenderId(
                         event.target
                           .value
@@ -1179,8 +1210,7 @@ function App() {
                             sender.id
                           }
                         >
-                          {sender.name}{" "}
-                          —{" "}
+                          {sender.name} —{" "}
                           {sender.email}
                         </option>
                       )
@@ -1203,6 +1233,7 @@ function App() {
                 <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/10 p-3 text-sm text-yellow-300">
                   No active sender configured.
                   Add a sender before scheduling.
+
                   <button
                     type="button"
                     onClick={() =>
@@ -1229,23 +1260,27 @@ function App() {
                   setRecipients(
                     event.target.value
                   );
+
                   setUploadCount(0);
                 }}
-                placeholder={`Enter email addresses separated by commas or new lines`}
+                placeholder="Enter email addresses separated by commas or new lines"
                 rows={5}
                 className="w-full resize-none rounded-lg border border-slate-700 bg-[#080b12] px-3 py-3 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-blue-500"
               />
 
               <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
                 <span>
-                  {parseRecipients(
-                    recipients
-                  ).length}{" "}
+                  {
+                    parseRecipients(
+                      recipients
+                    ).length
+                  }{" "}
                   recipient(s)
                 </span>
 
                 <label className="cursor-pointer rounded-md border border-slate-700 px-3 py-1.5 text-slate-300 hover:bg-slate-800">
                   Upload CSV/TXT
+
                   <input
                     type="file"
                     accept=".csv,.txt"
@@ -1312,8 +1347,7 @@ function App() {
                   value={scheduledAt}
                   onChange={(event) =>
                     setScheduledAt(
-                      event.target
-                        .value
+                      event.target.value
                     )
                   }
                   className="w-full rounded-lg border border-slate-700 bg-[#080b12] px-3 py-2.5 text-sm text-slate-200 outline-none focus:border-blue-500"
@@ -1331,8 +1365,7 @@ function App() {
                   }
                   onChange={(event) =>
                     setDelayBetweenEmailsMs(
-                      event.target
-                        .value
+                      event.target.value
                     )
                   }
                   className="w-full rounded-lg border border-slate-700 bg-[#080b12] px-3 py-2.5 text-sm text-slate-200 outline-none focus:border-blue-500"
@@ -1340,18 +1373,23 @@ function App() {
                   <option value="0">
                     No delay
                   </option>
+
                   <option value="500">
                     0.5 second
                   </option>
+
                   <option value="1000">
                     1 second
                   </option>
+
                   <option value="2000">
                     2 seconds
                   </option>
+
                   <option value="5000">
                     5 seconds
                   </option>
+
                   <option value="10000">
                     10 seconds
                   </option>
@@ -1464,6 +1502,7 @@ function App() {
                   }
                   className="h-4 w-4 rounded border-slate-600 bg-slate-800"
                 />
+
                 Use secure SMTP connection
               </label>
             </div>
@@ -1546,6 +1585,7 @@ function App() {
                   setShowSenderManager(
                     false
                   );
+
                   setShowSenderModal(
                     true
                   );
@@ -1566,6 +1606,7 @@ function App() {
                       setShowSenderManager(
                         false
                       );
+
                       setShowSenderModal(
                         true
                       );
@@ -1645,8 +1686,12 @@ function App() {
 
 function LoginScreen() {
   function handleGoogleLogin() {
+    /*
+     * IMPORTANT:
+     * This now goes to Render instead of Vercel /api.
+     */
     window.location.href =
-      "/api/auth/google";
+      `${API_BASE}/auth/google`;
   }
 
   return (
@@ -1677,6 +1722,7 @@ function LoginScreen() {
             <span className="text-lg font-bold">
               G
             </span>
+
             Continue with Google
           </button>
 
@@ -1721,10 +1767,13 @@ function StatusBadge({
   > = {
     SCHEDULED:
       "bg-blue-500/10 text-blue-400",
+
     PROCESSING:
       "bg-yellow-500/10 text-yellow-400",
+
     SENT:
       "bg-green-500/10 text-green-400",
+
     FAILED:
       "bg-red-500/10 text-red-400",
   };
@@ -1783,6 +1832,7 @@ function SlackCard({
           <>
             <div className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-green-400" />
+
               <span className="text-sm font-medium text-green-400">
                 Connected
               </span>
@@ -1834,6 +1884,7 @@ function SlackCard({
           <>
             <div className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-slate-600" />
+
               <span className="text-sm text-slate-400">
                 Not connected
               </span>
@@ -1924,6 +1975,7 @@ function SenderCard({
                     <p className="truncate text-sm text-slate-300">
                       {sender.name}
                     </p>
+
                     <p className="truncate text-xs text-slate-600">
                       {sender.email}
                     </p>
