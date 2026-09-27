@@ -1,44 +1,26 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import Papa from "papaparse";
-import {
-  getEmails,
-  getSenders,
-  scheduleBulkEmails,
-  createSender,
-  toggleSender,
-  searchEmails,
-} from "./services/api";
+import { useEffect, useState } from "react";
 
 const API_BASE =
   import.meta.env.VITE_API_URL ||
   "https://reachinbox-backend-tmec.onrender.com/api";
 
-const BACKEND_BASE = API_BASE.replace(/\/api\/?$/, "");
-
-type EmailStatus = "SCHEDULED" | "PROCESSING" | "SENT" | "FAILED";
-
-interface Email {
+type Email = {
   id: string;
   to: string;
   subject: string;
   body: string;
-  status: EmailStatus;
-  scheduledAt?: string | null;
-  sentAt?: string | null;
-  createdAt?: string;
-  failedAt?: string | null;
-  error?: string | null;
-}
+  status: string;
+  scheduledAt?: string;
+  sentAt?: string;
+};
 
-interface Sender {
+type Sender = {
   id: string;
   email: string;
-  name?: string | null;
+  name?: string;
   dailyLimit?: number;
   isActive?: boolean;
-}
-
-const DEMO_USER_ID = "demo-user";
+};
 
 function App() {
   const [activeTab, setActiveTab] = useState<"scheduled" | "sent">(
@@ -48,193 +30,136 @@ function App() {
   const [emails, setEmails] = useState<Email[]>([]);
   const [senders, setSenders] = useState<Sender[]>([]);
 
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
-
-  const [search, setSearch] = useState("");
-
-  const [showScheduleModal, setShowScheduleModal] = useState(false);
-  const [showSenderModal, setShowSenderModal] = useState(false);
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [showSender, setShowSender] = useState(false);
 
   const [recipients, setRecipients] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
-
   const [scheduledAt, setScheduledAt] = useState("");
 
   const [senderEmail, setSenderEmail] = useState("");
   const [senderName, setSenderName] = useState("");
   const [dailyLimit, setDailyLimit] = useState("100");
 
-  const [uploading, setUploading] = useState(false);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const USER_ID = "demo-user";
 
-  const [selectedStatus, setSelectedStatus] = useState<
-    "ALL" | EmailStatus
-  >("ALL");
+  // -----------------------------
+  // LOAD DASHBOARD DATA
+  // -----------------------------
 
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-
-  const [stats, setStats] = useState({
-    scheduled: 0,
-    sent: 0,
-    failed: 0,
-    total: 0,
-  });
-
-  const refreshData = async () => {
+  const loadDashboard = async () => {
     try {
       setLoading(true);
 
-      const [emailResponse, senderResponse] = await Promise.all([
-        getEmails(DEMO_USER_ID),
-        getSenders(DEMO_USER_ID),
-      ]);
-
-      const emailData =
-        Array.isArray(emailResponse)
-          ? emailResponse
-          : (emailResponse as any)?.emails ||
-            (emailResponse as any)?.data ||
-            [];
-
-      const senderData =
-        Array.isArray(senderResponse)
-          ? senderResponse
-          : (senderResponse as any)?.senders ||
-            (senderResponse as any)?.data ||
-            [];
-
-      setEmails(emailData);
-      setSenders(senderData);
-
-      calculateStats(emailData);
-    } catch (error) {
-      console.error("Dashboard data error:", error);
-
-      setMessage(
-        "Dashboard is loaded. Backend data could not be fetched yet."
+      const emailResponse = await fetch(
+        `${API_BASE}/emails?userId=${USER_ID}`
       );
 
-      setEmails([]);
-      setSenders([]);
+      if (emailResponse.ok) {
+        const emailData = await emailResponse.json();
 
-      setStats({
-        scheduled: 0,
-        sent: 0,
-        failed: 0,
-        total: 0,
-      });
+        const list =
+          emailData?.emails ||
+          emailData?.data ||
+          emailData ||
+          [];
+
+        if (Array.isArray(list)) {
+          setEmails(list);
+        }
+      }
+
+      const senderResponse = await fetch(
+        `${API_BASE}/senders?userId=${USER_ID}`
+      );
+
+      if (senderResponse.ok) {
+        const senderData = await senderResponse.json();
+
+        const list =
+          senderData?.senders ||
+          senderData?.data ||
+          senderData ||
+          [];
+
+        if (Array.isArray(list)) {
+          setSenders(list);
+        }
+      }
+    } catch (error) {
+      console.error("Dashboard loading error:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  const calculateStats = (data: Email[]) => {
-    setStats({
-      scheduled: data.filter((email) => email.status === "SCHEDULED").length,
-      sent: data.filter((email) => email.status === "SENT").length,
-      failed: data.filter((email) => email.status === "FAILED").length,
-      total: data.length,
-    });
-  };
-
   useEffect(() => {
-    refreshData();
-
-    const interval = setInterval(() => {
-      refreshData();
-    }, 15000);
-
-    return () => clearInterval(interval);
+    loadDashboard();
   }, []);
 
-  const filteredEmails = useMemo(() => {
-    let result = emails;
+  // -----------------------------
+  // SCHEDULE EMAILS
+  // -----------------------------
 
-    if (activeTab === "scheduled") {
-      result = result.filter(
-        (email) =>
-          email.status === "SCHEDULED" ||
-          email.status === "PROCESSING"
-      );
-    }
-
-    if (activeTab === "sent") {
-      result = result.filter(
-        (email) =>
-          email.status === "SENT" ||
-          email.status === "FAILED"
-      );
-    }
-
-    if (selectedStatus !== "ALL") {
-      result = result.filter(
-        (email) => email.status === selectedStatus
-      );
-    }
-
-    if (search.trim()) {
-      const query = search.toLowerCase();
-
-      result = result.filter(
-        (email) =>
-          email.to.toLowerCase().includes(query) ||
-          email.subject.toLowerCase().includes(query) ||
-          email.body.toLowerCase().includes(query)
-      );
-    }
-
-    return result;
-  }, [emails, activeTab, selectedStatus, search]);
-
-  const validateEmail = (email: string) => {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  };
-
-  const parseRecipients = () => {
-    return recipients
-      .split(/[\n,;]/)
-      .map((email) => email.trim())
-      .filter(Boolean)
-      .filter(validateEmail);
-  };
-
-  const handleSchedule = async () => {
+  const scheduleEmails = async () => {
     try {
-      const emailList = parseRecipients();
+      const emailList = recipients
+        .split(/[\n,;]/)
+        .map((email) => email.trim())
+        .filter(Boolean);
 
       if (emailList.length === 0) {
-        setMessage("Please enter at least one valid email address.");
+        setMessage("Enter at least one recipient.");
         return;
       }
 
       if (!subject.trim()) {
-        setMessage("Please enter a subject.");
+        setMessage("Enter an email subject.");
         return;
       }
 
       if (!body.trim()) {
-        setMessage("Please enter email content.");
+        setMessage("Enter the email body.");
         return;
       }
 
       if (!scheduledAt) {
-        setMessage("Please select a scheduled date and time.");
+        setMessage("Select a schedule date and time.");
         return;
       }
 
       setLoading(true);
-      setMessage("");
 
-      await scheduleBulkEmails({
-        userId: DEMO_USER_ID,
-        recipients: emailList,
-        subject,
-        body,
-        scheduledAt: new Date(scheduledAt).toISOString(),
-      });
+      const response = await fetch(
+        `${API_BASE}/emails/schedule-bulk`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            userId: USER_ID,
+            recipients: emailList,
+            subject,
+            body,
+            scheduledAt: new Date(scheduledAt).toISOString(),
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data?.message || "Unable to schedule emails"
+        );
+      }
 
       setMessage(
         `${emailList.length} email(s) scheduled successfully.`
@@ -245,36 +170,58 @@ function App() {
       setBody("");
       setScheduledAt("");
 
-      setShowScheduleModal(false);
+      setShowSchedule(false);
 
-      await refreshData();
+      await loadDashboard();
     } catch (error: any) {
-      console.error("Schedule error:", error);
+      console.error(error);
 
       setMessage(
-        error?.response?.data?.message ||
-          "Unable to schedule emails. Check the backend."
+        error?.message ||
+          "Unable to schedule emails."
       );
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCreateSender = async () => {
+  // -----------------------------
+  // CREATE SENDER
+  // -----------------------------
+
+  const addSender = async () => {
     try {
-      if (!senderEmail.trim() || !validateEmail(senderEmail)) {
-        setMessage("Please enter a valid sender email.");
+      if (!senderEmail.trim()) {
+        setMessage("Enter sender email.");
         return;
       }
 
       setLoading(true);
 
-      await createSender({
-        userId: DEMO_USER_ID,
-        email: senderEmail.trim(),
-        name: senderName.trim() || undefined,
-        dailyLimit: Number(dailyLimit) || 100,
-      });
+      const response = await fetch(
+        `${API_BASE}/senders`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            userId: USER_ID,
+            email: senderEmail,
+            name: senderName,
+            dailyLimit: Number(dailyLimit) || 100,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data?.message || "Unable to add sender"
+        );
+      }
 
       setMessage("Sender added successfully.");
 
@@ -282,792 +229,869 @@ function App() {
       setSenderName("");
       setDailyLimit("100");
 
-      setShowSenderModal(false);
+      setShowSender(false);
 
-      await refreshData();
+      await loadDashboard();
     } catch (error: any) {
-      console.error("Create sender error:", error);
+      console.error(error);
 
       setMessage(
-        error?.response?.data?.message ||
-          "Unable to create sender."
+        error?.message ||
+          "Unable to add sender."
       );
     } finally {
       setLoading(false);
     }
   };
 
-  const handleToggleSender = async (sender: Sender) => {
-    try {
-      await toggleSender(sender.id, !sender.isActive);
+  // -----------------------------
+  // FILTER EMAILS
+  // -----------------------------
 
-      setMessage(
-        `${sender.email} ${
-          sender.isActive ? "disabled" : "enabled"
-        }.`
-      );
+  const visibleEmails = emails.filter((email) => {
+    const matchesTab =
+      activeTab === "scheduled"
+        ? email.status === "SCHEDULED" ||
+          email.status === "PROCESSING"
+        : email.status === "SENT" ||
+          email.status === "FAILED";
 
-      await refreshData();
-    } catch (error) {
-      console.error(error);
-      setMessage("Unable to update sender.");
-    }
-  };
+    const query = search.toLowerCase();
 
-  const handleFileUpload = (
-    event: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const file = event.target.files?.[0];
+    const matchesSearch =
+      !query ||
+      email.to?.toLowerCase().includes(query) ||
+      email.subject?.toLowerCase().includes(query);
 
-    if (!file) return;
+    return matchesTab && matchesSearch;
+  });
 
-    setUploading(true);
+  const scheduledCount = emails.filter(
+    (email) => email.status === "SCHEDULED"
+  ).length;
 
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        const rows = results.data as Record<string, string>[];
+  const processingCount = emails.filter(
+    (email) => email.status === "PROCESSING"
+  ).length;
 
-        const extractedEmails = rows
-          .map((row) => {
-            return (
-              row.email ||
-              row.Email ||
-              row.EMAIL ||
-              row.to ||
-              row.To ||
-              row.recipient ||
-              ""
-            );
-          })
-          .map((email) => email.trim())
-          .filter(validateEmail);
+  const sentCount = emails.filter(
+    (email) => email.status === "SENT"
+  ).length;
 
-        if (extractedEmails.length === 0) {
-          setMessage(
-            "No valid email addresses were found in the file."
-          );
-        } else {
-          setRecipients((previous) => {
-            const existing = previous
-              .split(/[\n,;]/)
-              .map((x) => x.trim())
-              .filter(Boolean);
+  const failedCount = emails.filter(
+    (email) => email.status === "FAILED"
+  ).length;
 
-            return [...existing, ...extractedEmails].join("\n");
-          });
+  // -----------------------------
+  // DATE FORMAT
+  // -----------------------------
 
-          setMessage(
-            `${extractedEmails.length} email address(es) imported.`
-          );
-        }
-
-        setUploading(false);
-      },
-      error: (error) => {
-        console.error(error);
-        setMessage("Unable to read the file.");
-        setUploading(false);
-      },
-    });
-
-    event.target.value = "";
-  };
-
-  const handleSearch = async () => {
-    if (!search.trim()) {
-      await refreshData();
-      return;
-    }
+  const formatDate = (date?: string) => {
+    if (!date) return "-";
 
     try {
-      setLoading(true);
-
-      const result = await searchEmails(
-        DEMO_USER_ID,
-        search.trim()
-      );
-
-      const data =
-        Array.isArray(result)
-          ? result
-          : (result as any)?.emails ||
-            (result as any)?.data ||
-            [];
-
-      setEmails(data);
-      calculateStats(data);
-    } catch (error) {
-      console.error(error);
-      setMessage("Search failed.");
-    } finally {
-      setLoading(false);
+      return new Date(date).toLocaleString();
+    } catch {
+      return "-";
     }
   };
 
-  const formatDate = (value?: string | null) => {
-    if (!value) return "-";
-
-    return new Date(value).toLocaleString();
-  };
-
-  const getStatusClass = (status: EmailStatus) => {
-    switch (status) {
-      case "SENT":
-        return "bg-green-100 text-green-700";
-
-      case "FAILED":
-        return "bg-red-100 text-red-700";
-
-      case "PROCESSING":
-        return "bg-yellow-100 text-yellow-700";
-
-      default:
-        return "bg-blue-100 text-blue-700";
-    }
-  };
+  // -----------------------------
+  // UI
+  // -----------------------------
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      {/* Mobile overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-30 bg-black/30 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "#f5f7fb",
+        fontFamily:
+          "Inter, Arial, Helvetica, sans-serif",
+        color: "#111827",
+      }}
+    >
+      {/* TOP NAVBAR */}
 
-      {/* Sidebar */}
-      <aside
-        className={`fixed left-0 top-0 z-40 h-screen w-64 transform bg-white border-r border-slate-200 transition-transform lg:translate-x-0 ${
-          sidebarOpen
-            ? "translate-x-0"
-            : "-translate-x-full"
-        }`}
+      <header
+        style={{
+          height: "70px",
+          background: "#ffffff",
+          borderBottom: "1px solid #e5e7eb",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "0 32px",
+          position: "sticky",
+          top: 0,
+          zIndex: 10,
+        }}
       >
-        <div className="flex h-16 items-center border-b border-slate-200 px-6">
-          <div>
-            <div className="text-xl font-bold text-slate-900">
-              ReachInbox
-            </div>
+        <div>
+          <div
+            style={{
+              fontSize: "22px",
+              fontWeight: 700,
+            }}
+          >
+            ReachInbox
+          </div>
 
-            <div className="text-xs text-slate-500">
-              Email Scheduler
-            </div>
+          <div
+            style={{
+              fontSize: "12px",
+              color: "#6b7280",
+              marginTop: "2px",
+            }}
+          >
+            Email Scheduling Dashboard
           </div>
         </div>
 
-        <nav className="p-4 space-y-2">
+        <div
+          style={{
+            display: "flex",
+            gap: "10px",
+          }}
+        >
           <button
-            onClick={() => {
-              setActiveTab("scheduled");
-              setSidebarOpen(false);
+            onClick={loadDashboard}
+            style={{
+              padding: "10px 16px",
+              borderRadius: "8px",
+              border: "1px solid #d1d5db",
+              background: "#ffffff",
+              cursor: "pointer",
             }}
-            className={`w-full rounded-lg px-4 py-3 text-left text-sm font-medium ${
-              activeTab === "scheduled"
-                ? "bg-slate-900 text-white"
-                : "text-slate-600 hover:bg-slate-100"
-            }`}
           >
-            📅 Scheduled
+            {loading ? "Loading..." : "Refresh"}
           </button>
 
           <button
-            onClick={() => {
-              setActiveTab("sent");
-              setSidebarOpen(false);
+            onClick={() => setShowSchedule(true)}
+            style={{
+              padding: "10px 18px",
+              borderRadius: "8px",
+              border: "none",
+              background: "#111827",
+              color: "#ffffff",
+              cursor: "pointer",
+              fontWeight: 600,
             }}
-            className={`w-full rounded-lg px-4 py-3 text-left text-sm font-medium ${
-              activeTab === "sent"
-                ? "bg-slate-900 text-white"
-                : "text-slate-600 hover:bg-slate-100"
-            }`}
           >
-            ✉️ Sent
+            + Schedule Email
           </button>
-
-          <button
-            onClick={() => {
-              setShowSenderModal(true);
-              setSidebarOpen(false);
-            }}
-            className="w-full rounded-lg px-4 py-3 text-left text-sm font-medium text-slate-600 hover:bg-slate-100"
-          >
-            👤 Senders
-          </button>
-
-          <button
-            onClick={() => {
-              setShowScheduleModal(true);
-              setSidebarOpen(false);
-            }}
-            className="w-full rounded-lg px-4 py-3 text-left text-sm font-medium text-slate-600 hover:bg-slate-100"
-          >
-            ➕ Schedule Email
-          </button>
-        </nav>
-
-        <div className="absolute bottom-0 left-0 right-0 border-t border-slate-200 p-4">
-          <div className="mb-2 text-xs text-slate-400">
-            Backend
-          </div>
-
-          <div className="break-all text-xs text-slate-500">
-            {BACKEND_BASE}
-          </div>
         </div>
-      </aside>
+      </header>
 
-      {/* Main */}
-      <main className="lg:pl-64">
-        {/* Header */}
-        <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white px-4 lg:px-8">
-          <button
-            className="rounded-lg border border-slate-200 px-3 py-2 lg:hidden"
-            onClick={() => setSidebarOpen(true)}
+      {/* MAIN CONTENT */}
+
+      <main
+        style={{
+          maxWidth: "1400px",
+          margin: "0 auto",
+          padding: "32px",
+        }}
+      >
+        {/* MESSAGE */}
+
+        {message && (
+          <div
+            style={{
+              background: "#ffffff",
+              border: "1px solid #e5e7eb",
+              borderRadius: "10px",
+              padding: "14px 18px",
+              marginBottom: "24px",
+              display: "flex",
+              justifyContent: "space-between",
+            }}
           >
-            ☰
-          </button>
-
-          <div className="hidden lg:block">
-            <h1 className="text-lg font-semibold">
-              {activeTab === "scheduled"
-                ? "Scheduled Emails"
-                : "Sent Emails"}
-            </h1>
-
-            <p className="text-xs text-slate-500">
-              Manage your email campaigns
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              onClick={refreshData}
-              disabled={loading}
-              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
-            >
-              {loading ? "Refreshing..." : "↻ Refresh"}
-            </button>
+            <span>{message}</span>
 
             <button
-              onClick={() => setShowScheduleModal(true)}
-              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+              onClick={() => setMessage("")}
+              style={{
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+              }}
             >
-              + Schedule
+              ×
             </button>
           </div>
-        </header>
+        )}
 
-        <div className="p-4 lg:p-8">
-          {/* Message */}
-          {message && (
-            <div className="mb-6 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm">
-              <span>{message}</span>
+        {/* STAT CARDS */}
 
-              <button
-                onClick={() => setMessage("")}
-                className="ml-4 text-slate-400 hover:text-slate-700"
-              >
-                ✕
-              </button>
-            </div>
-          )}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns:
+              "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: "18px",
+            marginBottom: "28px",
+          }}
+        >
+          <StatCard
+            title="Total Emails"
+            value={emails.length}
+          />
 
-          {/* Stats */}
-          <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="text-sm text-slate-500">
-                Total Emails
-              </div>
+          <StatCard
+            title="Scheduled"
+            value={scheduledCount}
+          />
 
-              <div className="mt-2 text-3xl font-bold">
-                {stats.total}
-              </div>
-            </div>
+          <StatCard
+            title="Processing"
+            value={processingCount}
+          />
 
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="text-sm text-slate-500">
-                Scheduled
-              </div>
+          <StatCard
+            title="Sent"
+            value={sentCount}
+          />
 
-              <div className="mt-2 text-3xl font-bold text-blue-600">
-                {stats.scheduled}
-              </div>
-            </div>
+          <StatCard
+            title="Failed"
+            value={failedCount}
+          />
+        </div>
 
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="text-sm text-slate-500">
-                Sent
-              </div>
+        {/* EMAIL SECTION */}
 
-              <div className="mt-2 text-3xl font-bold text-green-600">
-                {stats.sent}
-              </div>
-            </div>
+        <section
+          style={{
+            background: "#ffffff",
+            border: "1px solid #e5e7eb",
+            borderRadius: "12px",
+            overflow: "hidden",
+          }}
+        >
+          {/* SECTION HEADER */}
 
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="text-sm text-slate-500">
-                Failed
-              </div>
-
-              <div className="mt-2 text-3xl font-bold text-red-600">
-                {stats.failed}
-              </div>
-            </div>
-          </section>
-
-          {/* Search */}
-          <section className="mt-8 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-col gap-3 md:flex-row">
-              <input
-                value={search}
-                onChange={(event) =>
-                  setSearch(event.target.value)
-                }
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    handleSearch();
-                  }
+          <div
+            style={{
+              padding: "22px 24px",
+              borderBottom: "1px solid #e5e7eb",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "20px",
+              flexWrap: "wrap",
+            }}
+          >
+            <div>
+              <h2
+                style={{
+                  margin: 0,
+                  fontSize: "18px",
                 }}
-                placeholder="Search recipient, subject or body..."
-                className="flex-1 rounded-lg border border-slate-300 px-4 py-2.5 text-sm outline-none focus:border-slate-500"
-              />
-
-              <button
-                onClick={handleSearch}
-                className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white"
               >
-                Search
-              </button>
-            </div>
-          </section>
+                Email Campaigns
+              </h2>
 
-          {/* Tabs and filters */}
-          <section className="mt-6 flex flex-col justify-between gap-4 md:flex-row md:items-center">
-            <div className="flex rounded-lg border border-slate-200 bg-white p-1">
-              <button
-                onClick={() => setActiveTab("scheduled")}
-                className={`rounded-md px-5 py-2 text-sm font-medium ${
-                  activeTab === "scheduled"
-                    ? "bg-slate-900 text-white"
-                    : "text-slate-600"
-                }`}
+              <p
+                style={{
+                  margin: "5px 0 0",
+                  color: "#6b7280",
+                  fontSize: "13px",
+                }}
               >
-                Scheduled
-              </button>
-
-              <button
-                onClick={() => setActiveTab("sent")}
-                className={`rounded-md px-5 py-2 text-sm font-medium ${
-                  activeTab === "sent"
-                    ? "bg-slate-900 text-white"
-                    : "text-slate-600"
-                }`}
-              >
-                Sent
-              </button>
+                View and manage scheduled and sent emails.
+              </p>
             </div>
 
-            <select
-              value={selectedStatus}
+            <input
+              value={search}
               onChange={(event) =>
-                setSelectedStatus(
-                  event.target.value as "ALL" | EmailStatus
-                )
+                setSearch(event.target.value)
               }
-              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm"
+              placeholder="Search emails..."
+              style={{
+                width: "260px",
+                maxWidth: "100%",
+                padding: "10px 13px",
+                border: "1px solid #d1d5db",
+                borderRadius: "8px",
+                outline: "none",
+              }}
+            />
+          </div>
+
+          {/* TABS */}
+
+          <div
+            style={{
+              padding: "16px 24px",
+              borderBottom: "1px solid #e5e7eb",
+              display: "flex",
+              gap: "8px",
+            }}
+          >
+            <button
+              onClick={() => setActiveTab("scheduled")}
+              style={{
+                padding: "9px 18px",
+                borderRadius: "7px",
+                border: "none",
+                background:
+                  activeTab === "scheduled"
+                    ? "#111827"
+                    : "#f3f4f6",
+                color:
+                  activeTab === "scheduled"
+                    ? "#ffffff"
+                    : "#374151",
+                cursor: "pointer",
+                fontWeight: 600,
+              }}
             >
-              <option value="ALL">All statuses</option>
-              <option value="SCHEDULED">Scheduled</option>
-              <option value="PROCESSING">Processing</option>
-              <option value="SENT">Sent</option>
-              <option value="FAILED">Failed</option>
-            </select>
-          </section>
+              Scheduled
+            </button>
 
-          {/* Email table */}
-          <section className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="min-w-full">
-                <thead className="border-b border-slate-200 bg-slate-50">
+            <button
+              onClick={() => setActiveTab("sent")}
+              style={{
+                padding: "9px 18px",
+                borderRadius: "7px",
+                border: "none",
+                background:
+                  activeTab === "sent"
+                    ? "#111827"
+                    : "#f3f4f6",
+                color:
+                  activeTab === "sent"
+                    ? "#ffffff"
+                    : "#374151",
+                cursor: "pointer",
+                fontWeight: 600,
+              }}
+            >
+              Sent
+            </button>
+          </div>
+
+          {/* TABLE */}
+
+          <div
+            style={{
+              overflowX: "auto",
+            }}
+          >
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+              }}
+            >
+              <thead>
+                <tr
+                  style={{
+                    background: "#f9fafb",
+                  }}
+                >
+                  <TableHeader>Recipient</TableHeader>
+                  <TableHeader>Subject</TableHeader>
+                  <TableHeader>Status</TableHeader>
+                  <TableHeader>Scheduled At</TableHeader>
+                  <TableHeader>Sent At</TableHeader>
+                </tr>
+              </thead>
+
+              <tbody>
+                {visibleEmails.length === 0 ? (
                   <tr>
-                    <th className="px-5 py-4 text-left text-xs font-semibold uppercase text-slate-500">
-                      Recipient
-                    </th>
-
-                    <th className="px-5 py-4 text-left text-xs font-semibold uppercase text-slate-500">
-                      Subject
-                    </th>
-
-                    <th className="px-5 py-4 text-left text-xs font-semibold uppercase text-slate-500">
-                      Status
-                    </th>
-
-                    <th className="px-5 py-4 text-left text-xs font-semibold uppercase text-slate-500">
-                      Scheduled
-                    </th>
-
-                    <th className="px-5 py-4 text-left text-xs font-semibold uppercase text-slate-500">
-                      Sent
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody className="divide-y divide-slate-100">
-                  {filteredEmails.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={5}
-                        className="px-5 py-16 text-center"
-                      >
-                        <div className="text-4xl">📭</div>
-
-                        <div className="mt-3 text-sm font-medium text-slate-700">
-                          No emails found
-                        </div>
-
-                        <div className="mt-1 text-sm text-slate-400">
-                          Schedule an email to see it here.
-                        </div>
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredEmails.map((email) => (
-                      <tr
-                        key={email.id}
-                        className="hover:bg-slate-50"
-                      >
-                        <td className="px-5 py-4 text-sm font-medium">
-                          {email.to}
-                        </td>
-
-                        <td className="max-w-xs truncate px-5 py-4 text-sm text-slate-600">
-                          {email.subject}
-                        </td>
-
-                        <td className="px-5 py-4">
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-medium ${getStatusClass(
-                              email.status
-                            )}`}
-                          >
-                            {email.status}
-                          </span>
-                        </td>
-
-                        <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-500">
-                          {formatDate(email.scheduledAt)}
-                        </td>
-
-                        <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-500">
-                          {formatDate(email.sentAt)}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          {/* Senders */}
-          <section className="mt-8 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-semibold">
-                  Email Senders
-                </h2>
-
-                <p className="mt-1 text-sm text-slate-500">
-                  Manage sender accounts and daily limits.
-                </p>
-              </div>
-
-              <button
-                onClick={() => setShowSenderModal(true)}
-                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium hover:bg-slate-50"
-              >
-                + Add Sender
-              </button>
-            </div>
-
-            <div className="mt-5 grid gap-3">
-              {senders.length === 0 ? (
-                <div className="rounded-lg bg-slate-50 p-5 text-center text-sm text-slate-500">
-                  No senders available.
-                </div>
-              ) : (
-                senders.map((sender) => (
-                  <div
-                    key={sender.id}
-                    className="flex flex-col justify-between gap-3 rounded-lg border border-slate-200 p-4 md:flex-row md:items-center"
-                  >
-                    <div>
-                      <div className="font-medium">
-                        {sender.email}
-                      </div>
-
-                      <div className="text-sm text-slate-500">
-                        {sender.name || "No name"} · Daily limit:{" "}
-                        {sender.dailyLimit ?? 100}
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() =>
-                        handleToggleSender(sender)
-                      }
-                      className={`rounded-lg px-4 py-2 text-sm font-medium ${
-                        sender.isActive
-                          ? "bg-green-100 text-green-700"
-                          : "bg-slate-100 text-slate-600"
-                      }`}
+                    <td
+                      colSpan={5}
+                      style={{
+                        textAlign: "center",
+                        padding: "70px 20px",
+                        color: "#6b7280",
+                      }}
                     >
-                      {sender.isActive
-                        ? "Active"
-                        : "Inactive"}
-                    </button>
-                  </div>
-                ))
-              )}
+                      <div
+                        style={{
+                          fontSize: "42px",
+                          marginBottom: "12px",
+                        }}
+                      >
+                        📭
+                      </div>
+
+                      <div
+                        style={{
+                          fontWeight: 600,
+                          color: "#374151",
+                          marginBottom: "5px",
+                        }}
+                      >
+                        No emails found
+                      </div>
+
+                      <div
+                        style={{
+                          fontSize: "13px",
+                        }}
+                      >
+                        Click "Schedule Email" to create your
+                        first scheduled email.
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  visibleEmails.map((email) => (
+                    <tr key={email.id}>
+                      <TableCell>
+                        {email.to}
+                      </TableCell>
+
+                      <TableCell>
+                        {email.subject}
+                      </TableCell>
+
+                      <TableCell>
+                        <Status status={email.status} />
+                      </TableCell>
+
+                      <TableCell>
+                        {formatDate(email.scheduledAt)}
+                      </TableCell>
+
+                      <TableCell>
+                        {formatDate(email.sentAt)}
+                      </TableCell>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* SENDERS */}
+
+        <section
+          style={{
+            marginTop: "28px",
+            background: "#ffffff",
+            border: "1px solid #e5e7eb",
+            borderRadius: "12px",
+            padding: "24px",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "18px",
+            }}
+          >
+            <div>
+              <h2
+                style={{
+                  margin: 0,
+                  fontSize: "18px",
+                }}
+              >
+                Email Senders
+              </h2>
+
+              <p
+                style={{
+                  margin: "5px 0 0",
+                  fontSize: "13px",
+                  color: "#6b7280",
+                }}
+              >
+                Manage your sending accounts.
+              </p>
             </div>
-          </section>
-        </div>
+
+            <button
+              onClick={() => setShowSender(true)}
+              style={{
+                padding: "9px 16px",
+                borderRadius: "8px",
+                border: "1px solid #d1d5db",
+                background: "#ffffff",
+                cursor: "pointer",
+              }}
+            >
+              + Add Sender
+            </button>
+          </div>
+
+          {senders.length === 0 ? (
+            <div
+              style={{
+                background: "#f9fafb",
+                borderRadius: "8px",
+                padding: "25px",
+                textAlign: "center",
+                color: "#6b7280",
+              }}
+            >
+              No senders added yet.
+            </div>
+          ) : (
+            senders.map((sender) => (
+              <div
+                key={sender.id}
+                style={{
+                  border: "1px solid #e5e7eb",
+                  borderRadius: "8px",
+                  padding: "15px",
+                  marginBottom: "10px",
+                }}
+              >
+                <strong>{sender.email}</strong>
+
+                <div
+                  style={{
+                    color: "#6b7280",
+                    fontSize: "13px",
+                    marginTop: "4px",
+                  }}
+                >
+                  {sender.name || "No name"} · Daily limit:{" "}
+                  {sender.dailyLimit || 100}
+                </div>
+              </div>
+            ))
+          )}
+        </section>
       </main>
 
-      {/* Schedule Modal */}
-      {showScheduleModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 p-6">
-              <div>
-                <h2 className="text-xl font-semibold">
-                  Schedule Emails
-                </h2>
+      {/* SCHEDULE MODAL */}
 
-                <p className="mt-1 text-sm text-slate-500">
-                  Add recipients and choose when to send.
-                </p>
-              </div>
+      {showSchedule && (
+        <Modal
+          title="Schedule Emails"
+          close={() => setShowSchedule(false)}
+        >
+          <label>Recipients</label>
 
-              <button
-                onClick={() => setShowScheduleModal(false)}
-                className="text-xl text-slate-400 hover:text-slate-700"
-              >
-                ✕
-              </button>
-            </div>
+          <textarea
+            value={recipients}
+            onChange={(event) =>
+              setRecipients(event.target.value)
+            }
+            placeholder="one@example.com&#10;two@example.com"
+            rows={5}
+            style={inputStyle}
+          />
 
-            <div className="space-y-5 p-6">
-              <div>
-                <div className="mb-2 flex items-center justify-between">
-                  <label className="text-sm font-medium">
-                    Recipients
-                  </label>
+          <label>Subject</label>
 
-                  <button
-                    onClick={() =>
-                      fileInputRef.current?.click()
-                    }
-                    className="text-sm font-medium text-blue-600 hover:underline"
-                  >
-                    {uploading
-                      ? "Importing..."
-                      : "Import CSV"}
-                  </button>
+          <input
+            value={subject}
+            onChange={(event) =>
+              setSubject(event.target.value)
+            }
+            placeholder="Email subject"
+            style={inputStyle}
+          />
 
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".csv,.txt"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
-                </div>
+          <label>Email Body</label>
 
-                <textarea
-                  value={recipients}
-                  onChange={(event) =>
-                    setRecipients(event.target.value)
-                  }
-                  placeholder="email1@example.com&#10;email2@example.com"
-                  rows={5}
-                  className="w-full rounded-lg border border-slate-300 px-4 py-3 text-sm outline-none focus:border-slate-500"
-                />
+          <textarea
+            value={body}
+            onChange={(event) =>
+              setBody(event.target.value)
+            }
+            placeholder="Write your email..."
+            rows={7}
+            style={inputStyle}
+          />
 
-                <p className="mt-1 text-xs text-slate-400">
-                  Separate multiple emails using commas, semicolons
-                  or new lines.
-                </p>
-              </div>
+          <label>Schedule At</label>
 
-              <div>
-                <label className="mb-2 block text-sm font-medium">
-                  Subject
-                </label>
+          <input
+            type="datetime-local"
+            value={scheduledAt}
+            onChange={(event) =>
+              setScheduledAt(event.target.value)
+            }
+            style={inputStyle}
+          />
 
-                <input
-                  value={subject}
-                  onChange={(event) =>
-                    setSubject(event.target.value)
-                  }
-                  placeholder="Email subject"
-                  className="w-full rounded-lg border border-slate-300 px-4 py-3 text-sm outline-none focus:border-slate-500"
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium">
-                  Email Body
-                </label>
-
-                <textarea
-                  value={body}
-                  onChange={(event) =>
-                    setBody(event.target.value)
-                  }
-                  placeholder="Write your email..."
-                  rows={7}
-                  className="w-full rounded-lg border border-slate-300 px-4 py-3 text-sm outline-none focus:border-slate-500"
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium">
-                  Schedule At
-                </label>
-
-                <input
-                  type="datetime-local"
-                  value={scheduledAt}
-                  onChange={(event) =>
-                    setScheduledAt(event.target.value)
-                  }
-                  className="w-full rounded-lg border border-slate-300 px-4 py-3 text-sm"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 border-t border-slate-200 pt-5">
-                <button
-                  onClick={() =>
-                    setShowScheduleModal(false)
-                  }
-                  className="rounded-lg border border-slate-300 px-5 py-2.5 text-sm font-medium"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  onClick={handleSchedule}
-                  disabled={loading}
-                  className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white disabled:opacity-50"
-                >
-                  {loading
-                    ? "Scheduling..."
-                    : "Schedule Emails"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+          <button
+            onClick={scheduleEmails}
+            disabled={loading}
+            style={primaryButton}
+          >
+            {loading ? "Scheduling..." : "Schedule Emails"}
+          </button>
+        </Modal>
       )}
 
-      {/* Sender Modal */}
-      {showSenderModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 p-6">
-              <div>
-                <h2 className="text-xl font-semibold">
-                  Add Sender
-                </h2>
+      {/* SENDER MODAL */}
 
-                <p className="mt-1 text-sm text-slate-500">
-                  Configure an email sender.
-                </p>
-              </div>
+      {showSender && (
+        <Modal
+          title="Add Sender"
+          close={() => setShowSender(false)}
+        >
+          <label>Sender Email</label>
 
-              <button
-                onClick={() => setShowSenderModal(false)}
-                className="text-xl text-slate-400"
-              >
-                ✕
-              </button>
-            </div>
+          <input
+            value={senderEmail}
+            onChange={(event) =>
+              setSenderEmail(event.target.value)
+            }
+            placeholder="sender@example.com"
+            style={inputStyle}
+          />
 
-            <div className="space-y-5 p-6">
-              <div>
-                <label className="mb-2 block text-sm font-medium">
-                  Email
-                </label>
+          <label>Sender Name</label>
 
-                <input
-                  value={senderEmail}
-                  onChange={(event) =>
-                    setSenderEmail(event.target.value)
-                  }
-                  placeholder="sender@example.com"
-                  className="w-full rounded-lg border border-slate-300 px-4 py-3 text-sm"
-                />
-              </div>
+          <input
+            value={senderName}
+            onChange={(event) =>
+              setSenderName(event.target.value)
+            }
+            placeholder="Sender name"
+            style={inputStyle}
+          />
 
-              <div>
-                <label className="mb-2 block text-sm font-medium">
-                  Name
-                </label>
+          <label>Daily Limit</label>
 
-                <input
-                  value={senderName}
-                  onChange={(event) =>
-                    setSenderName(event.target.value)
-                  }
-                  placeholder="Sender name"
-                  className="w-full rounded-lg border border-slate-300 px-4 py-3 text-sm"
-                />
-              </div>
+          <input
+            type="number"
+            value={dailyLimit}
+            onChange={(event) =>
+              setDailyLimit(event.target.value)
+            }
+            style={inputStyle}
+          />
 
-              <div>
-                <label className="mb-2 block text-sm font-medium">
-                  Daily Limit
-                </label>
-
-                <input
-                  type="number"
-                  min="1"
-                  value={dailyLimit}
-                  onChange={(event) =>
-                    setDailyLimit(event.target.value)
-                  }
-                  className="w-full rounded-lg border border-slate-300 px-4 py-3 text-sm"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 border-t border-slate-200 pt-5">
-                <button
-                  onClick={() =>
-                    setShowSenderModal(false)
-                  }
-                  className="rounded-lg border border-slate-300 px-5 py-2.5 text-sm"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  onClick={handleCreateSender}
-                  disabled={loading}
-                  className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm text-white disabled:opacity-50"
-                >
-                  {loading ? "Adding..." : "Add Sender"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+          <button
+            onClick={addSender}
+            disabled={loading}
+            style={primaryButton}
+          >
+            {loading ? "Adding..." : "Add Sender"}
+          </button>
+        </Modal>
       )}
     </div>
   );
 }
+
+// --------------------------------------------------
+// SMALL COMPONENTS
+// --------------------------------------------------
+
+function StatCard({
+  title,
+  value,
+}: {
+  title: string;
+  value: number;
+}) {
+  return (
+    <div
+      style={{
+        background: "#ffffff",
+        border: "1px solid #e5e7eb",
+        borderRadius: "12px",
+        padding: "22px",
+      }}
+    >
+      <div
+        style={{
+          color: "#6b7280",
+          fontSize: "13px",
+        }}
+      >
+        {title}
+      </div>
+
+      <div
+        style={{
+          fontSize: "30px",
+          fontWeight: 700,
+          marginTop: "8px",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function TableHeader({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <th
+      style={{
+        padding: "14px 18px",
+        textAlign: "left",
+        fontSize: "12px",
+        color: "#6b7280",
+        borderBottom: "1px solid #e5e7eb",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </th>
+  );
+}
+
+function TableCell({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <td
+      style={{
+        padding: "16px 18px",
+        borderBottom: "1px solid #f0f0f0",
+        fontSize: "14px",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </td>
+  );
+}
+
+function Status({ status }: { status: string }) {
+  let background = "#dbeafe";
+  let color = "#1d4ed8";
+
+  if (status === "SENT") {
+    background = "#dcfce7";
+    color = "#15803d";
+  }
+
+  if (status === "FAILED") {
+    background = "#fee2e2";
+    color = "#b91c1c";
+  }
+
+  if (status === "PROCESSING") {
+    background = "#fef3c7";
+    color = "#b45309";
+  }
+
+  return (
+    <span
+      style={{
+        background,
+        color,
+        borderRadius: "999px",
+        padding: "5px 10px",
+        fontSize: "12px",
+        fontWeight: 600,
+      }}
+    >
+      {status}
+    </span>
+  );
+}
+
+function Modal({
+  title,
+  close,
+  children,
+}: {
+  title: string;
+  close: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "20px",
+        zIndex: 100,
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: "600px",
+          maxHeight: "90vh",
+          overflowY: "auto",
+          background: "#ffffff",
+          borderRadius: "14px",
+          padding: "28px",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            marginBottom: "25px",
+          }}
+        >
+          <h2
+            style={{
+              margin: 0,
+            }}
+          >
+            {title}
+          </h2>
+
+          <button
+            onClick={close}
+            style={{
+              border: "none",
+              background: "transparent",
+              fontSize: "22px",
+              cursor: "pointer",
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "10px",
+          }}
+        >
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "12px",
+  border: "1px solid #d1d5db",
+  borderRadius: "8px",
+  fontSize: "14px",
+  marginBottom: "8px",
+};
+
+const primaryButton: React.CSSProperties = {
+  width: "100%",
+  padding: "12px",
+  border: "none",
+  borderRadius: "8px",
+  background: "#111827",
+  color: "#ffffff",
+  fontWeight: 600,
+  cursor: "pointer",
+  marginTop: "12px",
+};
 
 export default App;
